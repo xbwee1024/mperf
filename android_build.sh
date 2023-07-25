@@ -16,9 +16,9 @@ READLINK=readlink
 MAKEFILE_TYPE="Ninja"
 OS=$(uname -s)
 
-if [ $OS = "Darwin" ];then
-    READLINK=greadlink
-fi
+# if [ $OS = "Darwin" ];then
+#     READLINK=greadlink
+# fi
 
 SRC_DIR=$(dirname $($READLINK -f $0))
 echo "the SRC_DIR val is $SRC_DIR"
