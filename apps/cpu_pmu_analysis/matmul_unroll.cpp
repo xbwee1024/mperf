@@ -107,6 +107,7 @@ void AddDot8x12(int k, float* a, int lda, float* b, int ldb, float* c,
     a_7p_pntr = &A(7, 0);
     // 用来暂存一次计算8*12=96个元素的一次乘加的中间结果，即A的每行取出一个数乘以B的3个向量，产生3个新向量，8行一共需要24个向量（24*4=96）
     // 最后累加起来就是C对应元素的结果
+    // 注：确保循环体内每条指令用不同的寄存器
     float32x4_t c_p00_sum = {0};
     float32x4_t c_p04_sum = {0};
     float32x4_t c_p08_sum = {0};
