@@ -8,24 +8,23 @@
 #include <sys/syscall.h>
 #include <unistd.h>
 #endif
-#include <errno.h>
 #include <string.h>
-#include <sys/mman.h>
-#include <sys/time.h>
 
 #include "mperf/cpu_affinity.h"
-#include "mperf/timer.h"
 #include "mperf/tma/tma.h"
 
-#define ENABLE_TMA 1
+#define W(i, j) w[(i)*n + (j)]
+#define X(i) x[(i)]
+#define Y(i) xout[(i)]
+
 void matmul_naive(float* xout, float* x, float* w, int n, int d) {
     // W (d,n) @ x (n,) -> xout (d,)
     for (int i = 0; i < d; i++) {
         float val = 0.0f;
         for (int j = 0; j < n; j++) {
-            val += w[i * n + j] * x[j];
+            val += W(i,j) * X(j);
         }
-        xout[i] = val;
+        Y(i) = val;
     }
 }
 
@@ -48,7 +47,6 @@ void gettma(int n, int d) {
     // warm up
     matmul_naive(y, x, w, n, d);
 
-#if ENABLE_TMA
 #if defined(__aarch64__)
     mperf::tma::MPFTMA mpf_tma(mperf::MPFXPUType::A55);
     // clang-format off
@@ -112,29 +110,22 @@ void gettma(int n, int d) {
     size_t uncore_evt_num = mpf_tma.uncore_events_num();
     for (size_t i = 0; i < gn; ++i) {
         mpf_tma.start(i);
-#endif
         for (size_t j = 0; j < iter_num; ++j) {
             matmul_naive(y, x, w, n, d);
         }
-#if ENABLE_TMA
         mpf_tma.sample_and_stop(iter_num);
     }
 
     for (size_t i = 0; i < uncore_evt_num; ++i) {
         mpf_tma.start_uncore(i);
-#endif
         for (size_t j = 0; j < iter_num; ++j) {
             matmul_naive(y, x, w, n, d);
 
-#if ENABLE_TMA
             mpf_tma.sample(1);
-#endif
         }
-#if ENABLE_TMA
         // mpf_tma.sample_and_stop(iter_num);
     }
     mpf_tma.deinit();
-#endif
 
     delete[] w;
     delete[] x;
@@ -147,6 +138,7 @@ int main() {
         printf("faild set thread affinity(core %d)\n", dev_id);
     }
 
+    gettma(128, 128);
     gettma(288, 288);
     gettma(512, 512);
 

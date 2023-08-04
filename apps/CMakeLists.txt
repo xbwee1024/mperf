@@ -31,6 +31,7 @@ compile_cpu_analysis_cases(cpu_pmu_analysis matmul_pack arm_cpu_)
 compile_cpu_analysis_cases(cpu_pmu_analysis matmul_asm arm_cpu_)
 
 compile_cpu_analysis_cases(llama2_pmu_analysis matmul_naive llama2_cpu_)
+compile_cpu_analysis_cases(llama2_pmu_analysis matmul_unroll llama2_cpu_)
 
 endif()
 

@@ -72,10 +72,12 @@ void my_matmul_unroll(int m, int n, int k, float* a, int lda, float* b, int ldb,
             AddDot8x12(k, &A(i, 0), lda, &B(0, j), ldb, &C(i, j), ldc);
         }
         if (i != m) {
+            fprintf(stderr, "%s:%d %d != %d\n", __FILE__, __LINE__, i, m);
             AddDot4x12(k, &A(i, 0), lda, &B(0, j), ldb, &C(i, j), ldc);
         }
     }
     if (j != n) {
+        fprintf(stderr, "%s:%d %d != %d\n", __FILE__, __LINE__, j, n);
         for (; j < n; j += 4) {
             for (i = 0; i < m; i += 8) {
                 if (i + 8 > m)
@@ -83,6 +85,7 @@ void my_matmul_unroll(int m, int n, int k, float* a, int lda, float* b, int ldb,
                 AddDot8x4(k, &A(i, 0), lda, &B(0, j), ldb, &C(i, j), ldc);
             }
             if (i != m) {
+                fprintf(stderr, "%s:%d %d != %d\n", __FILE__, __LINE__, i, m);
                 AddDot4x4(k, &A(i, 0), lda, &B(0, j), ldb, &C(i, j), ldc);
             }
         }
@@ -93,7 +96,7 @@ void AddDot8x12(int k, float* a, int lda, float* b, int ldb, float* c,
                 int ldc) {
     float *a_0p_pntr, *a_1p_pntr, *a_2p_pntr, *a_3p_pntr, *a_4p_pntr,
             *a_5p_pntr, *a_6p_pntr, *a_7p_pntr;
-
+    // 每行首地址
     a_0p_pntr = &A(0, 0);
     a_1p_pntr = &A(1, 0);
     a_2p_pntr = &A(2, 0);
@@ -102,7 +105,8 @@ void AddDot8x12(int k, float* a, int lda, float* b, int ldb, float* c,
     a_5p_pntr = &A(5, 0);
     a_6p_pntr = &A(6, 0);
     a_7p_pntr = &A(7, 0);
-
+    // 用来暂存一次计算8*12=96个元素的一次乘加的中间结果，即A的每行取出一个数乘以B的3个向量，产生3个新向量，8行一共需要24个向量（24*4=96）
+    // 最后累加起来就是C对应元素的结果
     float32x4_t c_p00_sum = {0};
     float32x4_t c_p04_sum = {0};
     float32x4_t c_p08_sum = {0};
@@ -131,11 +135,15 @@ void AddDot8x12(int k, float* a, int lda, float* b, int ldb, float* c,
     register float a_0p_reg, a_1p_reg, a_2p_reg, a_3p_reg, a_4p_reg, a_5p_reg,
             a_6p_reg, a_7p_reg;
 
+    // 考虑把K维度压缩掉，即K=0，A就是个列向量，B是个行向量；这里就变成是A的8个元素，每个都遍历乘一次B的12个元素（scaler dot vector）
+    // 那遍历K的结果，就是对应位置再做累加
+    // 补充：所以如果B是一个向量，那压缩K纬度后变成一个点，这里就会是A每行的元素都乘一次B单个元素就结束了，同样遍历K就是对应位置累积
     for (int p = 0; p < k; ++p) {
+        // 把B的第p行，每次连续加载12列到寄存器，一次算完12列
         float32x4_t b_reg0 = vld1q_f32(&B(p, 0));
         float32x4_t b_reg4 = vld1q_f32(&B(p, 4));
         float32x4_t b_reg8 = vld1q_f32(&B(p, 8));
-
+        // A的8行第p列，一个循环内计算完8行
         a_0p_reg = *a_0p_pntr++;
         a_1p_reg = *a_1p_pntr++;
         a_2p_reg = *a_2p_pntr++;
@@ -144,7 +152,7 @@ void AddDot8x12(int k, float* a, int lda, float* b, int ldb, float* c,
         a_5p_reg = *a_5p_pntr++;
         a_6p_reg = *a_6p_pntr++;
         a_7p_reg = *a_7p_pntr++;
-
+        
         c_p00_sum = vmlaq_n_f32(c_p00_sum, b_reg0, a_0p_reg);
         c_p04_sum = vmlaq_n_f32(c_p04_sum, b_reg4, a_0p_reg);
         c_p08_sum = vmlaq_n_f32(c_p08_sum, b_reg8, a_0p_reg);
@@ -170,7 +178,7 @@ void AddDot8x12(int k, float* a, int lda, float* b, int ldb, float* c,
         c_p74_sum = vmlaq_n_f32(c_p74_sum, b_reg4, a_7p_reg);
         c_p78_sum = vmlaq_n_f32(c_p78_sum, b_reg8, a_7p_reg);
     }
-
+    // 结果存入C 8*12 区域，按行顺序存入
     float* c_pntr = 0;
     c_pntr = &C(0, 0);
     float32x4_t c_reg0 = vld1q_f32(c_pntr);
