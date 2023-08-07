@@ -138,9 +138,9 @@ int main() {
         printf("faild set thread affinity(core %d)\n", dev_id);
     }
 
-    gettma(128, 128);
     gettma(288, 288);
     gettma(512, 512);
+    gettma(768, 768);
 
     return 0;
 }
