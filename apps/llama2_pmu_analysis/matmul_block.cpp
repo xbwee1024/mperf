@@ -19,9 +19,11 @@
 #include "mperf/timer.h"
 #include "mperf/tma/tma.h"
 
-#define W(i, j) w[(i)*n + (j)]
+#define W(i, j) w[(i)*ldw + (j)]
 #define X(i) x[(i)]
 #define Y(i) xout[(i)]
+
+#define kc 64  // fixme: kc=L1D/(mr+nr) -> kc=L1D/mr=32kB/8*4byte=1024?
 
 static int unroll_num = 8;
 static int vec_size = 4;
@@ -57,48 +59,22 @@ float check(float* xout, float* x, float* w, int n, int d) {
 
 /* Routine for computing Y = W * x */
 
-// 在K维度上，循环展开一次计算8行，向量化4个连续元素
 void AddDot8x4(int, float*, float*, float*, int);
-// 在K维度上，循环展开一次计算8行，向量化8个连续元素
 void AddDot8x8(int, float*, float*, float*, int);
-// 在K维度上，循环展开一次计算4行，向量化8个连续元素
 void AddDot4x8(int, float*, float*, float*, int);
-// 在K维度上，循环展开一次计算4行，向量化16个连续元素
 void AddDot4x16(int, float*, float*, float*, int);
+void matmul_unroll(float*, float*, float*, int, int, int);
 
-void matmul_unroll(float* xout, float* x, float* w, int ldw, int n, int d) {
-    int i = 0;
-    
-    // 循环展开，一次处理的行数
-    if (unroll_num == 8) {
-        for (i = 0; i < d; i += 8) {
-            if (i + 8 > d)
-                break;
-            if (vec_size == 4)
-                AddDot8x4(n, &Y(i), &X(0), &W(i, 0), ldw);
-            else if (vec_size == 8)
-                AddDot8x8(n, &Y(i), &X(0), &W(i, 0), ldw);
-            else
-                fprintf(stderr, "unsupported AddDot8x%d\n", vec_size);
-        }
-    } else if (unroll_num == 4) {
-        for (i = 0; i < d; i += 4) {
-            if (i + 4 > d)
-                break;
-            if (vec_size == 8)
-                AddDot4x8(n, &Y(i), &X(0), &W(i, 0), ldw);
-            else if (vec_size == 16)
-                AddDot4x16(n, &Y(i), &X(0), &W(i, 0), ldw);
-            else
-                fprintf(stderr, "unsupported AddDot4x%d\n", vec_size);
-        }
-    } else {
-        fprintf(stderr, "unsupported unroll %d lines\n", unroll_num);
-    }
-    if (i != d) {
-        printf("%s:%d %d != %d\n", __FILE__, __LINE__, i, d);
+// just split n for blocks and leave d unchanged
+// So we will calculate each line many times, and have to load/store the Y element each time
+void matmul_block(float* xout, float* x, float* w, int ldw, int n, int d) {
+    int pb = 0;
+    for (int p = 0; p < n; p += kc) {
+        pb = std::min(kc, n - p);
+        matmul_unroll(&Y(0), &X(p), &W(0, p), ldw, pb, d);
     }
 }
+
 
 void gettma(int n, int d) {
     printf("----------d:%d, n:%d----------\n", d, n);
@@ -117,7 +93,8 @@ void gettma(int n, int d) {
         x[i] = (float)(rand() % 10);
     memset(y, 0, d * 1 * sizeof(float));
     // warm up
-    matmul_unroll(y, x, w, n, n, d);
+    matmul_block(y, x, w, n, n, d);
+
     float max_err = check(y, x, w, n, d);
     printf("max_err:%f\n", max_err);
     if (max_err > 0.1f) {
@@ -189,7 +166,7 @@ void gettma(int n, int d) {
     for (size_t i = 0; i < gn; ++i) {
         mpf_tma.start(i);
         for (size_t j = 0; j < iter_num; ++j) {
-            matmul_unroll(y, x, w, n, n, d);
+            matmul_block(y, x, w, n, n, d);
         }
         mpf_tma.sample_and_stop(iter_num);
     }
@@ -197,7 +174,7 @@ void gettma(int n, int d) {
     for (size_t i = 0; i < uncore_evt_num; ++i) {
         mpf_tma.start_uncore(i);
         for (size_t j = 0; j < iter_num; ++j) {
-            matmul_unroll(y, x, w, n, n, d);
+            matmul_block(y, x, w, n, n, d);
 
             mpf_tma.sample(1);
         }
@@ -214,7 +191,7 @@ int main(int argc, char** argv) {
     if (argc < 4) {
         fprintf(stderr, "Usage:\n");
         fprintf(stderr,
-                "./llama2_cpu_matmul_unroll core_id unroll_rows vec_size\n");
+                "./llama2_cpu_matmul_block core_id unroll_rows vec_size\n");
         return -1;
     }
     const int dev_id = atoi(argv[1]);
@@ -232,6 +209,40 @@ int main(int argc, char** argv) {
     gettma(768, 768);
 
     return 0;
+}
+
+void matmul_unroll(float* xout, float* x, float* w, int ldw, int n, int d) {
+    int i = 0;
+    // printf("matmul_unroll: (%d,%d)\n", n, d);
+    // 循环展开，一次处理的行数
+    if (unroll_num == 8) {
+        for (i = 0; i < d; i += 8) {
+            if (i + 8 > d)
+                break;
+            if (vec_size == 4)
+                AddDot8x4(n, &Y(i), &X(0), &W(i, 0), ldw);
+            else if (vec_size == 8)
+                AddDot8x8(n, &Y(i), &X(0), &W(i, 0), ldw);
+            else
+                fprintf(stderr, "unsupported AddDot8x%d\n", vec_size);
+        }
+    } else if (unroll_num == 4) {
+        for (i = 0; i < d; i += 4) {
+            if (i + 4 > d)
+                break;
+            if (vec_size == 8)
+                AddDot4x8(n, &Y(i), &X(0), &W(i, 0), ldw);
+            else if (vec_size == 16)
+                AddDot4x16(n, &Y(i), &X(0), &W(i, 0), ldw);
+            else
+                fprintf(stderr, "unsupported AddDot4x%d\n", vec_size);
+        }
+    } else {
+        fprintf(stderr, "unsupported unroll %d lines\n", unroll_num);
+    }
+    if (i != d) {
+        printf("%s:%d %d != %d\n", __FILE__, __LINE__, i, d);
+    }
 }
 
 void AddDot8x4(int n, float* xout, float* x, float* w, int ldw) {
