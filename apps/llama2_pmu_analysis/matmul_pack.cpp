@@ -59,22 +59,19 @@ float check(float* xout, float* x, float* w, int n, int d) {
 
 /* Routine for computing Y = W * x */
 
-void AddDot8x4(int, float*, float*, float*, int);
+void AddDot8x4_packed(int, float*, float*, float*, int);
 void AddDot8x8(int, float*, float*, float*, int);
 void AddDot4x8(int, float*, float*, float*, int);
 void AddDot4x16(int, float*, float*, float*, int);
-void matmul_unroll(float*, float*, float*, int, int, int);
+void matmul_unroll_packed(float*, float*, float*, int, int, int);
 
-// just split n for blocks and leave d unchanged
-// So we will calculate each line many times, and have to load/store the Y element each time
-void matmul_block(float* xout, float* x, float* w, int ldw, int n, int d) {
+void matmul_pack(float* xout, float* x, float* w, int ldw, int n, int d) {
     int pb = 0;
     for (int p = 0; p < n; p += kc) {
         pb = std::min(kc, n - p);
-        matmul_unroll(&Y(0), &X(p), &W(0, p), ldw, pb, d);
+        matmul_unroll_packed(&Y(0), &X(p), &W(0, p), ldw, pb, d);
     }
 }
-
 
 void gettma(int n, int d) {
     printf("----------d:%d, n:%d----------\n", d, n);
@@ -211,16 +208,15 @@ int main(int argc, char** argv) {
     return 0;
 }
 
-void matmul_unroll(float* xout, float* x, float* w, int ldw, int n, int d) {
+void matmul_unroll_packed(float* xout, float* x, float* w, int ldw, int n, int d) {
     int i = 0;
-    // printf("matmul_unroll: (%d,%d)\n", n, d);
     // 循环展开，一次处理的行数
     if (unroll_num == 8) {
         for (i = 0; i < d; i += 8) {
             if (i + 8 > d)
                 break;
             if (vec_size == 4)
-                AddDot8x4(n, &Y(i), &X(0), &W(i, 0), ldw);
+                AddDot8x4_packed(n, &Y(i), &X(0), &W(i, 0), ldw);
             else if (vec_size == 8)
                 AddDot8x8(n, &Y(i), &X(0), &W(i, 0), ldw);
             else
@@ -245,8 +241,41 @@ void matmul_unroll(float* xout, float* x, float* w, int ldw, int n, int d) {
     }
 }
 
-void AddDot8x4(int n, float* xout, float* x, float* w, int ldw) {
+void AddDot8x4_packed(int n, float* xout, float* x, float* w, int ldw) {
     int i;
+
+    // first, pack this block data
+    float* wp = (float*)memalign(4096, 8*n*sizeof(float));
+    float* w_nptr_l0 = w + ldw * 0;
+    float* w_nptr_l1 = w + ldw * 1;
+    float* w_nptr_l2 = w + ldw * 2;
+    float* w_nptr_l3 = w + ldw * 3;
+    float* w_nptr_l4 = w + ldw * 4;
+    float* w_nptr_l5 = w + ldw * 5;
+    float* w_nptr_l6 = w + ldw * 6;
+    float* w_nptr_l7 = w + ldw * 7;
+
+    for (int i = 0; i < n; i += 4) {
+        if (i + 4 > n)
+            break;
+        memcpy(wp + 4 * 0, w_nptr_l0, 4 * sizeof(float));
+        memcpy(wp + 4 * 1, w_nptr_l1, 4 * sizeof(float));
+        memcpy(wp + 4 * 2, w_nptr_l2, 4 * sizeof(float));
+        memcpy(wp + 4 * 3, w_nptr_l3, 4 * sizeof(float));
+        memcpy(wp + 4 * 4, w_nptr_l4, 4 * sizeof(float));
+        memcpy(wp + 4 * 5, w_nptr_l5, 4 * sizeof(float));
+        memcpy(wp + 4 * 6, w_nptr_l6, 4 * sizeof(float));
+        memcpy(wp + 4 * 7, w_nptr_l7, 4 * sizeof(float));
+
+        w_nptr_l0 += 4;
+        w_nptr_l1 += 4;
+        w_nptr_l2 += 4;
+        w_nptr_l3 += 4;
+        w_nptr_l4 += 4;
+        w_nptr_l5 += 4;
+        w_nptr_l6 += 4;
+        w_nptr_l7 += 4;
+    }
 
     // 先暂存循环展开的每行数据，整行处理完得到最终结果再存到内存。
     // 注：也可以每次写入xout，下一个循环再读出来累加，但效率不高
