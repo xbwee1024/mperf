@@ -59,3 +59,8 @@ compile_gpu_analysis_cases(adreno_pmu_analysis compute adreno_)
 compile_gpu_analysis_cases(adreno_pmu_analysis load adreno_)
 endif()
 endif()
+
+if(ANDROID)
+    # boxfilter
+    compile_cpu_analysis_cases(boxfilter_pmu_analysis boxfilter_naive boxfilter_cpu_)
+endif()
