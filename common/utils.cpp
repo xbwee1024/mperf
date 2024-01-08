@@ -12,12 +12,24 @@
 #include <cstdlib>
 #include "mperf/exception.h"
 #include "mperf_build_config.h"
+#ifdef MPERF_ENABLE_LOGCAT
+#include <android/log.h>
+namespace mperf {
+void android_log_handler(mperf::LogLevel level, const char* file,
+                         const char* func, int line, const char* fmt,
+                         va_list ap);
+}
+#endif
 
 using namespace mperf;
 
 /* ===================== logging =====================  */
 namespace {
+#ifdef MPERF_ENABLE_LOGCAT
+LogHandler g_log_handler = android_log_handler;
+#else
 LogHandler g_log_handler = stdout_log_handler;
+#endif
 
 std::string svsprintf(const char* fmt, va_list ap_orig) {
     int size = 100; /* Guess we need no more than 100 bytes */
@@ -151,6 +163,38 @@ void info_log_handler(mperf::LogLevel level, const char* file, const char* func,
         fprintf(stdout, "%s [%s] %s @%s:%d %s\n", LOG_TAG,
                 mperf::Level2Str[static_cast<int>(level)], msg, file, line,
                 func);
+}
+
+void android_log_handler(mperf::LogLevel level, const char* file,
+                         const char* func, int line, const char* fmt,
+                         va_list ap) {
+#ifdef MPERF_ENABLE_LOGCAT
+    constexpr int MAX_MSG_LEN = 1024;
+    if (static_cast<int>(level) < static_cast<int>(min_log_level)) {
+        return;
+    }
+    android_LogPriority android_level = ANDROID_LOG_INFO;
+    switch (level) {
+        case ::mperf::LogLevel::DEBUG: android_level = ANDROID_LOG_DEBUG; break;
+        case ::mperf::LogLevel::INFO: android_level = ANDROID_LOG_INFO; break;
+        case ::mperf::LogLevel::WARN: android_level = ANDROID_LOG_WARN; break;
+        case ::mperf::LogLevel::ERROR: android_level = ANDROID_LOG_ERROR; break;
+    }
+    char msg[MAX_MSG_LEN];
+    char* msg_ptr = msg;
+    int len = vsnprintf(msg_ptr, MAX_MSG_LEN, fmt, ap);
+    if (len >= MAX_MSG_LEN) {
+        msg_ptr = new char[len+1];
+        vsnprintf(msg_ptr, len, fmt, ap);
+        msg_ptr[len] = 0;
+    }
+
+    __android_log_print(android_level, LOG_TAG, "[%s] %s @%s:%d %s\n",
+                        mperf::Level2Str[static_cast<int>(level)], msg_ptr, file, line,
+                        func);
+    if (len >= MAX_MSG_LEN)
+        delete[] msg_ptr;
+#endif
 }
 
 std::vector<std::string> StrSplit(const std::string& str, char delim) {

@@ -121,6 +121,7 @@ target_link_libraries(mperf PUBLIC mperf_xpmu)
 add_subdirectory(apps)
 
 if(ANDROID)
+    target_compile_definitions(mperf PRIVATE MPERF_ENABLE_LOGCAT)
     target_link_libraries(mperf PRIVATE log)
 endif()
 
